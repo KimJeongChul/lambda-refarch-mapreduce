@@ -40,7 +40,7 @@
             ]
         },
         
-{
+        {
             "Sid": "Stmt1475879783000",
             "Effect": "Allow",
             "Action": [
@@ -62,18 +62,6 @@
             ],
             "Resource": [
                 "arn:aws:s3:::MY-S3-BUCKET/*"
-            ]
-        },
-
-        {
-            "Sid": "StmXrayAllow",
-            "Effect": "Allow",
-            "Action": [
-                "xray:PutTraceSegments",
-                "xray:PutTelemetryRecords"
-            ],
-            "Resource": [
-                "*"
             ]
         },
         
