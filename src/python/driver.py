@@ -251,6 +251,7 @@ print "S3 Storage Cost", s3_storage_hour_cost
 print "S3 Request Cost", s3_get_cost + s3_put_cost 
 print "S3 Cost", s3_cost 
 print "Total Cost: ", lambda_cost + s3_cost
+print "Total Latency: ", total_lambda_secs 
 print "Total Lines:", total_lines 
 
 # Delete Reducer function
