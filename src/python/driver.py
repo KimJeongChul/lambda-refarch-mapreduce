@@ -1,3 +1,4 @@
+#-*- coding: utf-8 -*-
 '''
  Driver to start BigLambda Job
  

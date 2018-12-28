@@ -1,3 +1,4 @@
+#-*- coding: utf-8 -*-
 '''
  * Copyright 2016, Amazon.com, Inc. or its affiliates. All Rights Reserved.
  *
