@@ -47,7 +47,7 @@ class LambdaManager(object):
                       Runtime = runtime,
                       Description = self.function_name,
                       MemorySize = self.memory,
-                      Timeout =  self.timeout,
+                      Timeout =  self.timeout
                     )
         self.function_arn = response['FunctionArn']
         print response
