@@ -33,35 +33,25 @@ from multiprocessing.dummy import Pool as ThreadPool
 from functools import partial
 
 from botocore.client import Config
-import logging
-from aws_xray_sdk.core import xray_recorder
-from aws_xray_sdk.core import patch_all
-patch_all()
-logging.basicConfig(level='WARNING')
-logging.getLogger('aws_xray_sdk').setLevel(logging.ERROR)
-# collect all tracing samples 
-SAMPLING_RULES = {"version": 1, "default": {"fixed_target": 1, "rate": 1}}
-xray_recorder.configure(sampling_rules=SAMPLING_RULES)
 
-xray_recorder.begin_segment('Map Reduce Driver')
 # create an S3 session
 s3 = boto3.resource('s3')
 s3_client = boto3.client('s3')
 
 JOB_INFO = 'jobinfo.json'
 
-### UTILS ####
-@xray_recorder.capture('zipLambda')
+### utils ####
+# 라이브러리와 코드 zip 패키징 
 def zipLambda(fname, zipname):
     # faster to zip with shell exec
     subprocess.call(['zip', zipname] + glob.glob(fname) + glob.glob(JOB_INFO) +
                         glob.glob("lambdautils.py"))
 
-@xray_recorder.capture('write_to_s3')
+# S3 Bucket에 file name(key), json(data) 저장
 def write_to_s3(bucket, key, data, metadata):
     s3.Bucket(bucket).put_object(Key=key, Body=data, Metadata=metadata)
 
-@xray_recorder.capture('write_job_config')
+# 실행 중인 job에 대한 정보를 json 으로 로컬에 저장
 def write_job_config(job_id, job_bucket, n_mappers, r_func, r_handler):
     fname = "jobinfo.json"; 
     with open(fname, 'w') as f:
@@ -76,113 +66,92 @@ def write_job_config(job_id, job_bucket, n_mappers, r_func, r_handler):
 
 
 ######### MAIN ############# 
-
 ## JOB ID 
 job_id =  "bl-release"
 
 # Config
 config = json.loads(open('driverconfig.json', 'r').read())
 
-# 1. Get all keys to be processed  
-xray_recorder.begin_subsegment('Get all keys to be processed')
-# init 
+# 1. Driver Job에 대한 설정 파일driverconfig) json 파일의 모든 key-value를 저장
 bucket = config["bucket"]
 job_bucket = config["jobBucket"]
 region = config["region"]
-lambda_memory = config["lambdaMemory"]
-concurrent_lambdas = config["concurrentLambdas"]
+lambda_memory = config["lambdaMemory"] # lambda 실제 메모리
+concurrent_lambdas = config["concurrentLambdas"] # 동시 실행 가능 수
 lambda_read_timeout = config["lambda_read_timeout"]
 boto_max_connections = config["boto_max_connections"]
 
-# Setting longer timeout for reading lambda results and larger connections pool
+# Lambda의 결과를 읽기 위한 timeout을 길게, connections pool을 많이 지정합니다.
 lambda_config = Config(read_timeout=lambda_read_timeout, max_pool_connections=boto_max_connections)
 lambda_client = boto3.client('lambda', config=lambda_config)
 
-# Fetch all the keys that match the prefix
+# prefix와 일치하는 모든 S3 bucket의 key를 가져옵니다.
 all_keys = []
 for obj in s3.Bucket(bucket).objects.filter(Prefix=config["prefix"]).all():
     all_keys.append(obj)
 
 bsize = lambdautils.compute_batch_size(all_keys, lambda_memory, concurrent_lambdas)
 batches = lambdautils.batch_creator(all_keys, bsize)
-n_mappers = len(batches)
-document = xray_recorder.current_subsegment()
-document.put_metadata("Batch size: ", bsize, "Processing initialization")
-document.put_metadata("Mappers: ", n_mappers, "Processing initialization")
-xray_recorder.end_subsegment() #Get all keys to be processed
+n_mappers = len(batches) # 최종적으로 구한 batches의 개수가 mapper로 결정
 
-# 2. Create the lambda functions
-xray_recorder.begin_subsegment('Prepare Lambda functions')
+# 2. Lambda Function 을 생성합니다.
 L_PREFIX = "BL"
 
-# Lambda functions
+# Lambda Functions 이름을 지정합니다.
 mapper_lambda_name = L_PREFIX + "-mapper-" +  job_id;
 reducer_lambda_name = L_PREFIX + "-reducer-" +  job_id; 
 rc_lambda_name = L_PREFIX + "-rc-" +  job_id;
 
-# write job config
+# Job 환경 설정을 json으로 파일 씁니다.
 write_job_config(job_id, job_bucket, n_mappers, reducer_lambda_name, config["reducer"]["handler"]);
 
+# 각 mapper와 reducer와 coordinator의 lambda_handler 코드를 패키징하여 압축합니다.
 zipLambda(config["mapper"]["name"], config["mapper"]["zip"])
 zipLambda(config["reducer"]["name"], config["reducer"]["zip"])
 zipLambda(config["reducerCoordinator"]["name"], config["reducerCoordinator"]["zip"])
-xray_recorder.end_subsegment() #Prepare Lambda functions
 
-# mapper
-xray_recorder.begin_subsegment('Create mapper Lambda function')
+# Mapper를 Lambda Function에 등록합니다.
 l_mapper = lambdautils.LambdaManager(lambda_client, s3_client, region, config["mapper"]["zip"], job_id,
         mapper_lambda_name, config["mapper"]["handler"])
 l_mapper.update_code_or_create_on_noexist()
-xray_recorder.end_subsegment() #Create mapper Lambda function
 
-# Reducer func
-xray_recorder.begin_subsegment('Create reducer Lambda function')
+# Reducer를 Lambda Function에 등록합니다.
 l_reducer = lambdautils.LambdaManager(lambda_client, s3_client, region, config["reducer"]["zip"], job_id,
         reducer_lambda_name, config["reducer"]["handler"])
 l_reducer.update_code_or_create_on_noexist()
-xray_recorder.end_subsegment() #Create reducer Lambda function
 
-# Coordinator
-xray_recorder.begin_subsegment('Create reducer coordinator Lambda function')
+# Coordinator를 Lambda Function에 등록합니다.
 l_rc = lambdautils.LambdaManager(lambda_client, s3_client, region, config["reducerCoordinator"]["zip"], job_id,
         rc_lambda_name, config["reducerCoordinator"]["handler"])
 l_rc.update_code_or_create_on_noexist()
 
-# Add permission to the coordinator
+# Coordinator에 작업을 할 Bucket에 대한 권한(permission)을 부여합니다.
 l_rc.add_lambda_permission(random.randint(1,1000), job_bucket)
 
-# create event source for coordinator
+# Coordinator에 작업을 할 Bucket에 대한 알림(notification)을 부여합니다.
 l_rc.create_s3_eventsource_notification(job_bucket)
-xray_recorder.end_subsegment() #Create reducer coordinator Lambda function
 
-# Write Jobdata to S3
-xray_recorder.begin_subsegment('Write job data to S3')
+# 실행 중인 job에 대한 정보를 json 으로 S3에 저장
 j_key = job_id + "/jobdata";
 data = json.dumps({
                 "mapCount": n_mappers, 
                 "totalS3Files": len(all_keys),
                 "startTime": time.time()
                 })
-xray_recorder.current_subsegment().put_metadata("Job data: ", data, "Write job data to S3")
 write_to_s3(job_bucket, j_key, data, {})
-xray_recorder.end_subsegment() #Write job data to S3
 
-### Execute ###
+######## MR 실행 ########
 
 mapper_outputs = []
 
 #2. Invoke Mappers
-xray_recorder.begin_subsegment('Invoke mappers')
 def invoke_lambda(batches, m_id):
-    xray_recorder.begin_segment('Invoke mapper Lambda')
     '''
-    lambda invoke function
+    Lambda 함수를 호출(invoke) 합니다.
     '''
 
-    #batch = [k['Key'] for k in batches[m_id-1]]
     batch = [k.key for k in batches[m_id-1]]
-    xray_recorder.current_segment().put_annotation("batch_for_mapper_"+str(m_id), str(batch))
-    #print "invoking", m_id, len(batch)
+
     resp = lambda_client.invoke( 
             FunctionName = mapper_lambda_name,
             InvocationType = 'RequestResponse',
@@ -197,7 +166,7 @@ def invoke_lambda(batches, m_id):
     out = eval(resp['Payload'].read())
     mapper_outputs.append(out)
     print "mapper output", out
-    xray_recorder.end_segment()
+
 # Exec Parallel
 print "# of Mappers ", n_mappers 
 pool = ThreadPool(n_mappers)
@@ -210,20 +179,14 @@ while mappers_executed < n_mappers:
     nm = min(concurrent_lambdas, n_mappers)
     results = pool.map(invoke_lambda_partial, Ids[mappers_executed: mappers_executed + nm])
     mappers_executed += nm
-    xray_recorder.current_subsegment().put_metadata("Mapper lambdas executed: ", mappers_executed, "Invoke mappers")
 
 pool.close()
 pool.join()
 
 print "all the mappers finished"
-xray_recorder.end_subsegment() #Invoke mappers
 
 # Delete Mapper function
-xray_recorder.begin_subsegment('Delete mappers')
 l_mapper.delete_function()
-xray_recorder.end_subsegment() #Delete mappers
-
-xray_recorder.begin_subsegment('Calculate cost')
 
 # Calculate costs - Approx (since we are using exec time reported by our func and not billed ms)
 total_lambda_secs = 0
@@ -267,31 +230,28 @@ while True:
 # S3 Storage cost - Account for mappers only; This cost is neglibile anyways since S3 
 # costs 3 cents/GB/month
 s3_storage_hour_cost = 1 * 0.0000521574022522109 * (total_s3_size/1024.0/1024.0/1024.0) # cost per GB/hr 
-s3_put_cost = len(job_keys) *  0.005/1000
+
+s3_put_cost = len(job_keys) *  0.005/1000 # PUT, COPY, POST, LIST Request 0.005 USD / request 1000
 
 # S3 GET # $0.004/10000 
 total_s3_get_ops += len(job_keys) 
-s3_get_cost = total_s3_get_ops * 0.004/10000 
+s3_get_cost = total_s3_get_ops * 0.004/10000  # GET, SELECT, etc Request 0.0004 USD / request 1000
 
 # Total Lambda costs
+# Lambda Memory 1024MB cost Request 100ms : 0.000001667 USD
 total_lambda_secs += reducer_lambda_time
-lambda_cost = total_lambda_secs * 0.00001667 * lambda_memory/ 1024.0
-s3_cost =  (s3_get_cost + s3_put_cost + s3_storage_hour_cost)
+lambda_cost = total_lambda_secs * 0.00001667 * lambda_memory / 1024.0
+s3_cost = (s3_get_cost + s3_put_cost + s3_storage_hour_cost)
 
 # Print costs
-print "Reducer L", reducer_lambda_time * 0.00001667 * lambda_memory/ 1024.0
+#print "Reducer Lambda Cost", reducer_lambda_time * 0.00001667 * lambda_memory/ 1024.0
 print "Lambda Cost", lambda_cost
 print "S3 Storage Cost", s3_storage_hour_cost
 print "S3 Request Cost", s3_get_cost + s3_put_cost 
 print "S3 Cost", s3_cost 
 print "Total Cost: ", lambda_cost + s3_cost
 print "Total Lines:", total_lines 
-xray_recorder.end_subsegment() #Calculate cost
 
 # Delete Reducer function
-xray_recorder.begin_subsegment('Delete reducers')
 l_reducer.delete_function()
 l_rc.delete_function()
-xray_recorder.end_subsegment() #Delete reducers
-
-xray_recorder.end_segment() #Map Reduce Driver
