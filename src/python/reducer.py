@@ -24,16 +24,17 @@ import StringIO
 import urllib2
 import time
 
-# create an S3 & Dynamo session
+# S3 session 생성
 s3 = boto3.resource('s3')
 s3_client = boto3.client('s3')
 
-# constants
+# Mapper의 결과가 저장된 S3 Bucket
 TASK_MAPPER_PREFIX = "task/mapper/";
+# Reducer의 결과를 저장할 S3 Bucket
 TASK_REDUCER_PREFIX = "task/reducer/";
 
+# 주어진 bucket 위치 경로에 파일 이름이 key인 object와 data를 저장합니다.
 def write_to_s3(bucket, key, data, metadata):
-    # Write to S3 Bucket
     s3.Bucket(bucket).put_object(Key=key, Body=data, Metadata=metadata)
 
 def lambda_handler(event, context):
@@ -48,13 +49,14 @@ def lambda_handler(event, context):
     step_id = event['stepId']
     n_reducers = event['nReducers']
     
-    # aggr 
     results = {}
     line_count = 0
 
-    # INPUT JSON => OUTPUT JSON
+    # 입력 CSV => 츌력 JSON 포멧
 
-    # Download and process all keys
+    # 모든 key를 다운로드하고 Reduce를 처리합니다.
+    # Reducer는 Mapper의 output 개수에 따라 1/2씩 처리가 되며 Reducer의 step 개수가 결정됩니다.
+    # Mapper의 output 개수가 64개라면 (step:output개수/1:32/2:16/3:12.8/4:4/5:2/6:1) 총 6단계 reduce 발생
     for key in reducer_keys:
         response = s3_client.get_object(Bucket=job_bucket, Key=key)
         contents = response['Body'].read()
@@ -69,16 +71,14 @@ def lambda_handler(event, context):
             print e
 
     time_in_secs = (time.time() - start_time)
-    #timeTaken = time_in_secs * 1000000000 # in 10^9 
-    #s3DownloadTime = 0
-    #totalProcessingTime = 0 
     pret = [len(reducer_keys), line_count, time_in_secs]
     print "Reducer ouputput", pret
 
     if n_reducers == 1:
-        # Last reducer file, final result
+        # 마지막 Reduce 단계의 file은 result로 저장합니다.
         fname = "%s/result" % job_id
     else:
+        # 중간 Reduce 단계의 저장
         fname = "%s/%s%s/%s" % (job_id, TASK_REDUCER_PREFIX, step_id, r_id)
     
     metadata = {
@@ -89,16 +89,3 @@ def lambda_handler(event, context):
 
     write_to_s3(job_bucket, fname, json.dumps(results), metadata)
     return pret
-
-'''
-ev = {
-    "bucket": "-useast-1",
-    "jobBucket": "-useast-1",
-    "jobId": "py-biglambda-1node-3",
-    "nReducers": 1,
-    "keys": ["py-biglambda-1node-3/task/mapper/1"],
-    "reducerId": 1, 
-    "stepId" : 1
-}
-lambda_handler(ev, {});
-'''
