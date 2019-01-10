@@ -1,3 +1,4 @@
+#-*- coding: utf-8 -*-
 '''
 Python reducer function
 
@@ -109,7 +110,7 @@ def lambda_handler(event, context):
             'lambda_mem_limit': {'S': context.memory_limit_in_mb},
             'download_time': {'S': str(total_download_time)},
             'upload_time': {'S': str(upload_time)},
-            'total_reducer_latency': {'S': time_in_secs},
+            'total_reducer_latency': {'S': str(time_in_secs)},
             'reduce_id': {'S': str(event['reducerId'])},
             'step_id': {'S': str(event['stepId'])},
             'n_step' : {'S': str(event['nReducer'])}
