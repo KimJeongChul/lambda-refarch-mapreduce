@@ -26,15 +26,32 @@ import time
 s3 = boto3.resource('s3')
 s3_client = boto3.client('s3')
 
+# DynamoDB session 생성
+dynamodb = boto3.client('dynamodb')
+
 # Mapper의 결과가 작성될 S3 Bucket 위치
 TASK_MAPPER_PREFIX = "task/mapper/";
+
+def get_vm_id():
+    buf = open('/proc/self/cgroup').read().split('\n')[-3].split('/')
+    vm_id, c_id = buf[1], buf[2]
+    return vm_id, c_id
+
+def get_cpuinfo():
+    buf = "".join(open("/proc/cpuinfo").readlines())
+    cpu_info = buf.replace("\n", ";").replace("\t", "")
+    cpu_info = cpu_info.split(';')[4]
+    return cpu_info
+
 
 # 주어진 bucket 위치 경로에 파일 이름이 key인 object와 data를 저장합니다.
 def write_to_s3(bucket, key, data, metadata):
     s3.Bucket(bucket).put_object(Key=key, Body=data, Metadata=metadata)
 
 def lambda_handler(event, context):
-    
+    r_id, c_id = get_vm_id()
+    cpu_model_name = get_cpuinfo()
+
     start_time = time.time()
 
     job_bucket = event['jobBucket']
@@ -47,13 +64,19 @@ def lambda_handler(event, context):
     line_count = 0
     err = ''
 
+    bucket_list = []
+    total_download_time = 0
     # 입력 CSV => 츌력 JSON 포멧
 
     # 모든 key를 다운로드하고 Map을 처리합니다.
     for key in src_keys:
+        start_download_time = time.time()
         response = s3_client.get_object(Bucket=src_bucket,Key=key)
         contents = response['Body'].read()
         
+        total_download_time += (time.time() - start_download_time)
+        bucket_list.append(key)
+
         # Map Function
         for line in contents.split('\n')[:-1]:
             line_count +=1
@@ -77,6 +100,24 @@ def lambda_handler(event, context):
                     "memoryUsage": '%s' % resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
                }
     print "metadata", metadata
+    
+    start_upload_time = time.time()
     write_to_s3(job_bucket, mapper_fname, json.dumps(output), metadata)
+    upload_time = (time.time() - start_upload_time)
+
+    # DynamoDB에 Item을 저장합니다.
+    dynamodb.put_item(TableName='lambda-network-io',
+        Item={
+            'r_id': {'S': r_id},
+            'timestamp': {'N': str(int(time.time()))},
+            'c_id': {'S': c_id},
+            'cpu_model_name': {'S': cpu_model_name},
+            'lambda_mem_limit': {'S': context.memory_limit_in_mb},
+            'download_time': {'S': str(total_download_time)},
+            'upload_time': {'S': str(upload_time)},
+            'file_list': {'S': str(bucket_list)}
+        }
+    )
+
     return pret
 
