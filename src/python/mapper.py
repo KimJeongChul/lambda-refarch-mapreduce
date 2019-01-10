@@ -1,3 +1,4 @@
+#-*- coding: utf-8 -*-
 '''
 Python mapper function
 
@@ -42,7 +43,6 @@ def get_cpuinfo():
     cpu_info = buf.replace("\n", ";").replace("\t", "")
     cpu_info = cpu_info.split(';')[4]
     return cpu_info
-
 
 # 주어진 bucket 위치 경로에 파일 이름이 key인 object와 data를 저장합니다.
 def write_to_s3(bucket, key, data, metadata):
@@ -100,7 +100,7 @@ def lambda_handler(event, context):
                     "memoryUsage": '%s' % resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
                }
     print "metadata", metadata
-    
+
     start_upload_time = time.time()
     write_to_s3(job_bucket, mapper_fname, json.dumps(output), metadata)
     upload_time = (time.time() - start_upload_time)
@@ -115,6 +115,7 @@ def lambda_handler(event, context):
             'lambda_mem_limit': {'S': context.memory_limit_in_mb},
             'download_time': {'S': str(total_download_time)},
             'upload_time': {'S': str(upload_time)},
+            'total_mapper_latency': {'S': str(time_in_secs)},
             'file_list': {'S': str(bucket_list)}
         }
     )
