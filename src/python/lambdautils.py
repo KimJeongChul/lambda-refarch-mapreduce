@@ -19,7 +19,7 @@ import botocore
 import os
 
 class LambdaManager(object):
-    def __init__ (self, l, s3, region, codepath, job_id, fname, handler, lmem=3008):
+    def __init__ (self, l, s3, region, codepath, job_id, fname, handler, lmem=1024):
         self.awslambda = l;
         self.region = "us-east-1" if region is None else region
         self.s3 = s3
@@ -29,8 +29,8 @@ class LambdaManager(object):
         self.handler = handler
         self.role = os.environ.get('serverless_mapreduce_role')
         self.memory = lmem 
-        self.timeout = 300
-        self.function_arn = None # set after creation
+        self.timeout = 900
+        self.function_arn = None # Lambda Function이 생성된 후에 설정됩니다.
 
     def create_lambda_function(self):
         '''
@@ -150,11 +150,14 @@ def compute_batch_size(keys, lambda_memory, concurrent_lambdas):
             size += key.size
     avg_object_size = size/len(keys) # object 당 평균 크기 / len(keys) : input object의 전체 개수
     print "Dataset size: %s, nKeys: %s, avg: %s" %(size, len(keys), avg_object_size)
+
     # 평균 object 크기가 하나의 Lambda에서 돌릴 수 있고, input object의 전체 개수가 동시 실행 수보다 적다면 
     if avg_object_size < max_mem_for_data and len(keys) < concurrent_lambdas: 
         b_size = 1
     else:
-        b_size = int(round(max_mem_for_data/avg_object_size))
+        b_size = int(round(max_mem_for_data/avg_object_size)) # 전체 메모리에서 평균 object 크기를 나눠 batch size를 계산합니다.
+        # 메모리가 충분히 크다면 하나의 Lambda에서 여러 개의 파일을 처리합니다.
+    print "Batch size : %s" %(b_size)
     return b_size
 
 def batch_creator(all_keys, batch_size):
