@@ -28,6 +28,9 @@ import time
 s3 = boto3.resource('s3')
 s3_client = boto3.client('s3')
 
+# DynamoDB session 생성
+dynamodb = boto3.client('dynamodb')
+
 # Mapper의 결과가 저장된 S3 Bucket
 TASK_MAPPER_PREFIX = "task/mapper/";
 # Reducer의 결과를 저장할 S3 Bucket
@@ -52,14 +55,19 @@ def lambda_handler(event, context):
     results = {}
     line_count = 0
 
+    total_download_time = 0
+
     # 입력 CSV => 츌력 JSON 포멧
 
     # 모든 key를 다운로드하고 Reduce를 처리합니다.
     # Reducer는 Mapper의 output 개수에 따라 1/2씩 처리가 되며 Reducer의 step 개수가 결정됩니다.
     # Mapper의 output 개수가 64개라면 (step:output개수/1:32/2:16/3:12.8/4:4/5:2/6:1) 총 6단계 reduce 발생
     for key in reducer_keys:
+        start_download_time = time.time()
         response = s3_client.get_object(Bucket=job_bucket, Key=key)
         contents = response['Body'].read()
+
+        total_download_time += (time.time() - start_download_time)
 
         try:
             for srcIp, val in json.loads(contents).iteritems():
@@ -87,5 +95,25 @@ def lambda_handler(event, context):
                     "memoryUsage": '%s' % resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
                }
 
+    start_upload_time = time.time()
     write_to_s3(job_bucket, fname, json.dumps(results), metadata)
+    upload_time = (time.time() - start_upload_time)
+
+    # DynamoDB에 Item을 저장합니다.
+    dynamodb.put_item(TableName='lambda-network-io',
+        Item={
+            'r_id': {'S': r_id},
+            'timestamp': {'N': str(int(time.time()))},
+            'c_id': {'S': c_id},
+            'cpu_model_name': {'S': cpu_model_name},
+            'lambda_mem_limit': {'S': context.memory_limit_in_mb},
+            'download_time': {'S': str(total_download_time)},
+            'upload_time': {'S': str(upload_time)},
+            'total_reducer_latency': {'S': time_in_secs},
+            'reduce_id': {'S': str(event['reducerId'])},
+            'step_id': {'S': str(event['stepId'])},
+            'n_step' : {'S': str(event['nReducer'])}
+        }
+    )
+
     return pret
