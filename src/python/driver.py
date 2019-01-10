@@ -67,10 +67,10 @@ def write_job_config(job_id, job_bucket, n_mappers, r_func, r_handler):
 
 
 ######### MAIN ############# 
-## JOB ID 
+## JOB ID 이름을 설정해주세요.
 job_id =  "bl-release"
 
-# Config
+# Config 파일
 config = json.loads(open('driverconfig.json', 'r').read())
 
 # 1. Driver Job에 대한 설정 파일driverconfig) json 파일의 모든 key-value를 저장
@@ -145,7 +145,7 @@ write_to_s3(job_bucket, j_key, data, {})
 
 mapper_outputs = []
 
-#2. Invoke Mappers
+# 3. Invoke Mappers
 def invoke_lambda(batches, m_id):
     '''
     Lambda 함수를 호출(invoke) 합니다.
@@ -168,13 +168,13 @@ def invoke_lambda(batches, m_id):
     mapper_outputs.append(out)
     print "mapper output", out
 
-# Exec Parallel
+# 병렬 실행 Parallel Execution
 print "# of Mappers ", n_mappers 
 pool = ThreadPool(n_mappers)
 Ids = [i+1 for i in range(n_mappers)]
 invoke_lambda_partial = partial(invoke_lambda, batches)
 
-# Burst request handling
+# Mapper의 개수 만큼 요청 Request Handling
 mappers_executed = 0
 while mappers_executed < n_mappers:
     nm = min(concurrent_lambdas, n_mappers)
@@ -184,12 +184,14 @@ while mappers_executed < n_mappers:
 pool.close()
 pool.join()
 
-print "all the mappers finished"
+print "all the mappers finished ..."
 
-# Delete Mapper function
+# Mapper Lambda function 삭제
 l_mapper.delete_function()
 
-# Calculate costs - Approx (since we are using exec time reported by our func and not billed ms)
+# 실제 Reduce 호출은 reducerCoordinator에서 실행
+
+# 실행 시간을 이용해 대략적인 비용을 계산합니다.
 total_lambda_secs = 0
 total_s3_get_ops = 0
 total_s3_put_ops = 0
@@ -201,13 +203,14 @@ for output in mapper_outputs:
     total_lines += int(output[1])
     total_lambda_secs += float(output[2])
 
+mapper_lambda_time = total_lambda_secs
 
 #Note: Wait for the job to complete so that we can compute total cost ; create a poll every 10 secs
 
-# Get all reducer keys
+# 모든 reducer의 keys를 가져옵니다.
 reducer_keys = []
 
-# Total execution time for reducers
+# Reducer의 전체 실행 시간을 가져옵니다.
 reducer_lambda_time = 0
 
 while True:
@@ -228,32 +231,34 @@ while True:
         break
     time.sleep(5)
 
-# S3 Storage cost - Account for mappers only; This cost is neglibile anyways since S3 
-# costs 3 cents/GB/month
+# S3 Storage 비용 - mapper만 계산합니다.
+# 비용은 3 cents/GB/month
 s3_storage_hour_cost = 1 * 0.0000521574022522109 * (total_s3_size/1024.0/1024.0/1024.0) # cost per GB/hr 
 
-s3_put_cost = len(job_keys) *  0.005/1000 # PUT, COPY, POST, LIST Request 0.005 USD / request 1000
+s3_put_cost = len(job_keys) *  0.005/1000 # PUT, COPY, POST, LIST 요청 비용 Request 0.005 USD / request 1000
 
-# S3 GET # $0.004/10000 
 total_s3_get_ops += len(job_keys) 
-s3_get_cost = total_s3_get_ops * 0.004/10000  # GET, SELECT, etc Request 0.0004 USD / request 1000
+s3_get_cost = total_s3_get_ops * 0.004/10000  # GET, SELECT, etc 요청 비용 Request 0.0004 USD / request 1000
 
-# Total Lambda costs
+# 전체 Lambda 비용 계산
 # Lambda Memory 1024MB cost Request 100ms : 0.000001667 USD
 total_lambda_secs += reducer_lambda_time
 lambda_cost = total_lambda_secs * 0.00001667 * lambda_memory / 1024.0
 s3_cost = (s3_get_cost + s3_put_cost + s3_storage_hour_cost)
 
-# Print costs
+# Cost 출력
 #print "Reducer Lambda Cost", reducer_lambda_time * 0.00001667 * lambda_memory/ 1024.0
+print "Mapper Execution Time", mapper_lambda_time
+print "Reducer Execution Time", reducer_lambda_time
+print "Tota Lambda Execution Time", total_lambda_secs
 print "Lambda Cost", lambda_cost
 print "S3 Storage Cost", s3_storage_hour_cost
 print "S3 Request Cost", s3_get_cost + s3_put_cost 
 print "S3 Cost", s3_cost 
 print "Total Cost: ", lambda_cost + s3_cost
 print "Total Latency: ", total_lambda_secs 
-print "Total Lines:", total_lines 
+print "Result Output Lines:", total_lines 
 
-# Delete Reducer function
+# Reducer Lambda function 삭제
 l_reducer.delete_function()
 l_rc.delete_function()
