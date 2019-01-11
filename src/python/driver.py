@@ -113,17 +113,17 @@ zipLambda(config["reducerCoordinator"]["name"], config["reducerCoordinator"]["zi
 
 # Mapper를 Lambda Function에 등록합니다.
 l_mapper = lambdautils.LambdaManager(lambda_client, s3_client, region, config["mapper"]["zip"], job_id,
-        mapper_lambda_name, config["mapper"]["handler"])
+        mapper_lambda_name, config["mapper"]["handler"], 128)
 l_mapper.update_code_or_create_on_noexist()
 
 # Reducer를 Lambda Function에 등록합니다.
 l_reducer = lambdautils.LambdaManager(lambda_client, s3_client, region, config["reducer"]["zip"], job_id,
-        reducer_lambda_name, config["reducer"]["handler"])
+        reducer_lambda_name, config["reducer"]["handler"], 1536)
 l_reducer.update_code_or_create_on_noexist()
 
 # Coordinator를 Lambda Function에 등록합니다.
 l_rc = lambdautils.LambdaManager(lambda_client, s3_client, region, config["reducerCoordinator"]["zip"], job_id,
-        rc_lambda_name, config["reducerCoordinator"]["handler"])
+        rc_lambda_name, config["reducerCoordinator"]["handler"], 1536)
 l_rc.update_code_or_create_on_noexist()
 
 # Coordinator에 작업을 할 Bucket에 대한 권한(permission)을 부여합니다.
