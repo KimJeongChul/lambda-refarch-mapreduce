@@ -67,6 +67,7 @@ def lambda_handler(event, context):
 
     bucket_list = []
     total_download_time = 0
+    num_of_file = len(src_keys)
     # 입력 CSV => 츌력 JSON 포멧
 
     # 모든 key를 다운로드하고 Map을 처리합니다.
@@ -117,6 +118,7 @@ def lambda_handler(event, context):
             'download_time': {'S': str(total_download_time)},
             'upload_time': {'S': str(upload_time)},
             'total_mapper_latency': {'S': str(time_in_secs)},
+            'num_of_file': {'S': str(num_of_file)},
             'file_list': {'S': str(bucket_list)}
         }
     )
