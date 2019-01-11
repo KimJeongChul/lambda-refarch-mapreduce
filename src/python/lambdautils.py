@@ -19,7 +19,7 @@ import botocore
 import os
 
 class LambdaManager(object):
-    def __init__ (self, l, s3, region, codepath, job_id, fname, handler, lmem=1024):
+    def __init__ (self, l, s3, region, codepath, job_id, fname, handler, lmem):
         self.awslambda = l;
         self.region = "us-east-1" if region is None else region
         self.s3 = s3
