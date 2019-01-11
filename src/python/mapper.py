@@ -31,7 +31,7 @@ s3_client = boto3.client('s3')
 dynamodb = boto3.client('dynamodb')
 
 # Mapper의 결과가 작성될 S3 Bucket 위치
-TASK_MAPPER_PREFIX = "task/mapper/";
+TASK_MAPPER_PREFIX = "task/mapper/"
 
 def get_vm_id():
     buf = open('/proc/self/cgroup').read().split('\n')[-3].split('/')
@@ -42,6 +42,7 @@ def get_cpuinfo():
     buf = "".join(open("/proc/cpuinfo").readlines())
     cpu_info = buf.replace("\n", ";").replace("\t", "")
     cpu_info = cpu_info.split(';')[4]
+    cpu_info = cpu_info.split(':')[1]
     return cpu_info
 
 # 주어진 bucket 위치 경로에 파일 이름이 key인 object와 data를 저장합니다.
