@@ -37,22 +37,38 @@ TASK_MAPPER_PREFIX = "task/mapper/";
 # Reducer의 결과를 저장할 S3 Bucket
 TASK_REDUCER_PREFIX = "task/reducer/";
 
+def get_vm_id():
+    buf = open('/proc/self/cgroup').read().split('\n')[-3].split('/')
+    vm_id, c_id = buf[1], buf[2]
+    return vm_id, c_id
+
+def get_cpuinfo():
+    buf = "".join(open("/proc/cpuinfo").readlines())
+    cpu_info = buf.replace("\n", ";").replace("\t", "")
+    cpu_info = cpu_info.split(';')[4]
+    cpu_info = cpu_info.split(':')[1]
+    return cpu_info
+
 # 주어진 bucket 위치 경로에 파일 이름이 key인 object와 data를 저장합니다.
 def write_to_s3(bucket, key, data, metadata):
     s3.Bucket(bucket).put_object(Key=key, Body=data, Metadata=metadata)
 
 def lambda_handler(event, context):
-    
+    r_id, c_id = get_vm_id()
+    cpu_model_name = get_cpuinfo()
+
     start_time = time.time()
     
     job_bucket = event['jobBucket']
     bucket = event['bucket']
     reducer_keys = event['keys']
     job_id = event['jobId']
-    r_id = event['reducerId']
+    reduce_id = event['reducerId']
     step_id = event['stepId']
     n_reducers = event['nReducers']
     
+
+
     results = {}
     line_count = 0
 
@@ -88,7 +104,7 @@ def lambda_handler(event, context):
         fname = "%s/result" % job_id
     else:
         # 중간 Reduce 단계의 저장
-        fname = "%s/%s%s/%s" % (job_id, TASK_REDUCER_PREFIX, step_id, r_id)
+        fname = "%s/%s%s/%s" % (job_id, TASK_REDUCER_PREFIX, step_id, reduce_id)
     
     metadata = {
                     "linecount":  '%s' % line_count,
@@ -111,9 +127,9 @@ def lambda_handler(event, context):
             'download_time': {'S': str(total_download_time)},
             'upload_time': {'S': str(upload_time)},
             'total_reducer_latency': {'S': str(time_in_secs)},
-            'reduce_id': {'S': str(event['reducerId'])},
-            'step_id': {'S': str(event['stepId'])},
-            'n_step' : {'S': str(event['nReducer'])}
+            'reduce_id': {'S': str(reduce_id)},
+            'step_id': {'S': str(step_id)},
+            'n_step' : {'S': str(n_reducers)}
         }
     )
 
