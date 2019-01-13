@@ -199,9 +199,9 @@ s3_storage_hours = 0
 total_lines = 0
 
 for output in mapper_outputs:
-    total_s3_get_ops += int(output[0])
-    total_lines += int(output[1])
-    total_lambda_secs += float(output[2])
+    total_s3_get_ops += int(output[4])
+    total_lines += int(output[5])
+    total_lambda_secs += float(output[6])
 
 mapper_lambda_time = total_lambda_secs
 
