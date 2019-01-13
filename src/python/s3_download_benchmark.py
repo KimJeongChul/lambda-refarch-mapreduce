@@ -1,3 +1,4 @@
+#-*- coding: utf-8 -*-
 '''
 Benchmark downloading files from S3
 '''
