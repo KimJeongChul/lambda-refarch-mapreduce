@@ -94,7 +94,7 @@ def lambda_handler(event, context):
     time_in_secs = (time.time() - start_time)
 
     # Mapper의 결과를 전처리, 이후에 S3에 저장
-    pret = [len(src_keys), line_count, time_in_secs, err]
+    pret = [r_id, c_id, cpu_model_name, int(context.memory_limit_in_mb), len(src_keys), line_count, time_in_secs, total_download_time, upload_time, err]
     mapper_fname = "%s/%s%s" % (job_id, TASK_MAPPER_PREFIX, mapper_id) 
     metadata = {
                     "linecount":  '%s' % line_count,
